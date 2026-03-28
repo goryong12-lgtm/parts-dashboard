@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1d4ed8">
+<title>파트팀 대시보드</title>
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f1f5f9;color:#1e293b}
+/* ── 헤더 ── */
+#header{position:fixed;top:0;left:0;right:0;height:52px;background:#1d4ed8;
+         display:flex;align-items:center;justify-content:space-between;padding:0 14px;z-index:200;
+         box-shadow:0 2px 8px rgba(0,0,0,.25)}
+#header h1{color:#fff;font-size:16px;font-weight:700}
+#header .right{display:flex;align-items:center;gap:10px}
+#header .sub{color:rgba(255,255,255,.65);font-size:11px}
+#filter-btn{background:none;border:none;cursor:pointer;padding:4px;
+             display:flex;align-items:center;justify-content:center}
+#filter-btn svg{width:20px;height:20px;stroke:#fff;stroke-width:1.8;fill:none}
+#filter-btn.has-filter svg{stroke:#fbbf24}
+/* ── 필터 패널 ── */
+#filter-panel{position:fixed;top:52px;left:0;right:0;background:#fff;z-index:190;
+               overflow:hidden;max-height:0;transition:max-height .25s ease;
+               box-shadow:0 4px 12px rgba(0,0,0,.12);border-bottom:1px solid #e2e8f0}
+#filter-panel.open{max-height:160px}
+.fp-row{display:flex;align-items:center;padding:8px 14px;gap:8px;border-bottom:1px solid #f1f5f9}
+.fp-row:last-child{border-bottom:none}
+.fp-label{font-size:11px;font-weight:600;color:#64748b;min-width:28px;flex-shrink:0}
+.fp-btns{display:flex;gap:5px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+.fp-btns::-webkit-scrollbar{display:none}
+.fbtn{flex-shrink:0;padding:5px 11px;border-radius:20px;border:1.5px solid #e2e8f0;
+       background:#fff;font-size:12px;font-weight:500;color:#64748b;cursor:pointer;
+       transition:all .15s;white-space:nowrap}
+.fbtn.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff;font-weight:600}
+/* ── 페이지 컨테이너 ── */
+#pages{position:fixed;top:52px;bottom:60px;left:0;right:0;overflow:hidden;
+        transition:top .25s ease}
+#pages.filter-open{top:204px}
+.page{position:absolute;top:0;bottom:0;left:0;right:0;overflow-y:auto;
+       padding:14px 14px 8px;
+       transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
+/* ── KPI 카드 ── */
+.kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.kpi-card{background:#fff;border-radius:12px;padding:14px 12px;
+           box-shadow:0 1px 4px rgba(0,0,0,.08);border-left:4px solid #3b82f6}
+.kpi-card.green{border-color:#10b981}.kpi-card.red{border-color:#ef4444}
+.kpi-card.amber{border-color:#f59e0b}.kpi-card.purple{border-color:#8b5cf6}
+.kpi-label{font-size:11px;color:#64748b;font-weight:500;margin-bottom:6px;line-height:1.3}
+.kpi-value{font-size:18px;font-weight:700;color:#1e293b;line-height:1}
+.kpi-sub{font-size:11px;color:#94a3b8;margin-top:4px}
+/* ── 차트 카드 ── */
+.chart-card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;
+             box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.chart-title{font-size:13px;font-weight:600;color:#334155;margin-bottom:12px}
+.chart-wrap{position:relative;height:200px}
+.chart-wrap.tall{height:240px}
+/* ── 하단 탭 ── */
+#tabs{position:fixed;bottom:0;left:0;right:0;height:60px;background:#fff;
+       display:grid;grid-template-columns:repeat(5,1fr);
+       border-top:1px solid #e2e8f0;z-index:200;
+       box-shadow:0 -2px 8px rgba(0,0,0,.06)}
+.tab{display:flex;flex-direction:column;align-items:center;justify-content:center;
+      gap:3px;color:#94a3b8;font-size:10px;font-weight:500;cursor:pointer;
+      transition:color .15s;padding-bottom:2px;user-select:none}
+.tab svg{width:22px;height:22px;stroke-width:1.8;fill:none;stroke:currentColor}
+.tab.active{color:#1d4ed8}
+.tab.active svg{stroke-width:2.3}
+/* ── 스와이프 인디케이터 ── */
+#dots{position:fixed;bottom:68px;left:0;right:0;display:flex;justify-content:center;gap:6px;z-index:199}
+.dot{width:6px;height:6px;border-radius:50%;background:#cbd5e1;transition:background .2s,transform .2s}
+.dot.active{background:#1d4ed8;transform:scale(1.3)}
+</style>
+</head>
+<body>
+
+<!-- ── 헤더 ── -->
+<div id="header">
+  <h1 id="page-title">종합현황</h1>
+  <div class="right">
+    <span class="sub">2026-03-29</span>
+    <button id="filter-btn" onclick="toggleFilter()">
+      <svg viewBox="0 0 24 24"><path d="M3 4h18M7 12h10M10 20h4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- ── 필터 패널 ── -->
+<div id="filter-panel">
+  <div class="fp-row">
+    <span class="fp-label">년도</span>
+    <div class="fp-btns">
+      <button class="fbtn active" data-val="2026" onclick="setF('year','2026',this)">2026년</button>
+    </div>
+  </div>
+  <div class="fp-row">
+    <span class="fp-label">월</span>
+    <div class="fp-btns" id="fp-month">
+      <button class="fbtn" data-val="전체" onclick="setF('month','전체',this)">전체</button>
+      <button class="fbtn" data-val="1" onclick="setF('month','1',this)">1월</button><button class="fbtn" data-val="2" onclick="setF('month','2',this)">2월</button><button class="fbtn active" data-val="3" onclick="setF('month','3',this)">3월</button>
+    </div>
+  </div>
+  <div class="fp-row">
+    <span class="fp-label">지점</span>
+    <div class="fp-btns" id="fp-branch">
+      <button class="fbtn active" data-val="전체" onclick="setF('branch','전체',this)">전체</button>
+      <button class="fbtn" data-val="전주" onclick="setF('branch','전주',this)">전주</button><button class="fbtn" data-val="평택" onclick="setF('branch','평택',this)">평택</button><button class="fbtn" data-val="군산" onclick="setF('branch','군산',this)">군산</button><button class="fbtn" data-val="목포" onclick="setF('branch','목포',this)">목포</button><button class="fbtn" data-val="서산" onclick="setF('branch','서산',this)">서산</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 페이지 컨테이너 ── -->
+<div id="pages">
+
+  <!-- ① Overview -->
+  <div class="page" id="p0">
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">총 재고금액</div>
+        <div class="kpi-value" id="ov-inv">-</div>
+        <div class="kpi-sub" id="ov-inv-sub"></div>
+      </div>
+      <div class="kpi-card red">
+        <div class="kpi-label">과잉재고금액</div>
+        <div class="kpi-value" id="ov-exc">-</div>
+      </div>
+      <div class="kpi-card amber">
+        <div class="kpi-label">부족재고 건수</div>
+        <div class="kpi-value" id="ov-shr-cnt">-</div>
+      </div>
+      <div class="kpi-card purple">
+        <div class="kpi-label">부족재고금액</div>
+        <div class="kpi-value" id="ov-shr-amt">-</div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">지점별 재고금액</div>
+      <div class="chart-wrap"><canvas id="ch-ov-branch"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ② Inventory -->
+  <div class="page" id="p1">
+    <div class="kpi-grid" style="grid-template-columns:1fr">
+      <div class="kpi-card">
+        <div class="kpi-label">총 재고금액</div>
+        <div class="kpi-value" id="inv-total">-</div>
+        <div class="kpi-sub" id="inv-sub"></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">지점별 재고금액</div>
+      <div class="chart-wrap"><canvas id="ch-inv-branch"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">ALOIS 코드별 재고금액</div>
+      <div class="chart-wrap tall"><canvas id="ch-inv-alois"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ③ O Part -->
+  <div class="page" id="p2">
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">O Part 재고금액</div>
+        <div class="kpi-value" id="op-total">-</div>
+      </div>
+      <div class="kpi-card green">
+        <div class="kpi-label">가용재고금액</div>
+        <div class="kpi-value" id="op-avail">-</div>
+      </div>
+      <div class="kpi-card amber">
+        <div class="kpi-label">총재고 대비 비율</div>
+        <div class="kpi-value" id="op-pct">-</div>
+      </div>
+      <div class="kpi-card purple">
+        <div class="kpi-label">O Part 부품 수</div>
+        <div class="kpi-value" id="op-cnt">-</div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">O Part 코드별 재고금액</div>
+      <div class="chart-wrap"><canvas id="ch-op-donut"></canvas></div>
+    </div>
+    <div id="op-code-grid" class="kpi-grid" style="margin-top:10px"></div>
+  </div>
+
+  <!-- ④ External Sales -->
+  <div class="page" id="p3">
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">외부판매 총 건수</div>
+        <div class="kpi-value" id="es-cnt">-</div>
+      </div>
+      <div class="kpi-card green">
+        <div class="kpi-label">외부판매 총 금액</div>
+        <div class="kpi-value" id="es-amt">-</div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">지점별 외부판매 건수</div>
+      <div class="chart-wrap"><canvas id="ch-es-cnt"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">지점별 외부판매 금액</div>
+      <div class="chart-wrap"><canvas id="ch-es-amt"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ⑤ Wholesale -->
+  <div class="page" id="p4">
+    <div class="kpi-grid">
+      <div class="kpi-card" style="border-color:#0ea5e9">
+        <div class="kpi-label">총 입고금액</div>
+        <div class="kpi-value" id="ws-purchase" style="color:#0ea5e9">-</div>
+        <div class="kpi-sub" id="ws-mo"></div>
+      </div>
+      <div class="kpi-card green">
+        <div class="kpi-label">인정금액</div>
+        <div class="kpi-value" id="ws-recog" style="color:#10b981">-</div>
+        <div class="kpi-sub">총입고 - 제외</div>
+      </div>
+      <div class="kpi-card red">
+        <div class="kpi-label">제외금액</div>
+        <div class="kpi-value" id="ws-excl" style="color:#ef4444">-</div>
+        <div class="kpi-sub">Wholesale 제외</div>
+      </div>
+      <div class="kpi-card amber">
+        <div class="kpi-label">A Target 달성률</div>
+        <div class="kpi-value" id="ws-rate-a">-</div>
+        <div class="kpi-sub" id="ws-tgt-a"></div>
+      </div>
+    </div>
+    <div class="kpi-grid" style="grid-template-columns:1fr">
+      <div class="kpi-card purple">
+        <div class="kpi-label">B Target 달성률</div>
+        <div class="kpi-value" id="ws-rate-b">-</div>
+        <div class="kpi-sub" id="ws-tgt-b"></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">지점별 Wholesale 달성 현황</div>
+      <div class="chart-wrap tall"><canvas id="ch-ws-bar"></canvas></div>
+    </div>
+  </div>
+
+</div><!-- /pages -->
+
+<div id="dots">
+  <div class="dot active"></div><div class="dot"></div>
+  <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+</div>
+
+<div id="tabs">
+  <div class="tab active" onclick="goPage(0)">
+    <svg viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    종합현황
+  </div>
+  <div class="tab" onclick="goPage(1)">
+    <svg viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    재고현황
+  </div>
+  <div class="tab" onclick="goPage(2)">
+    <svg viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    O Part
+  </div>
+  <div class="tab" onclick="goPage(3)">
+    <svg viewBox="0 0 24 24"><path d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    외부판매
+  </div>
+  <div class="tab" onclick="goPage(4)">
+    <svg viewBox="0 0 24 24"><path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Wholesale
+  </div>
+</div>
+
+<script>
+// ── 데이터 디코드 ─────────────────────────────────────────────
+function _D(b64){
+  var bin=atob(b64),buf=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i);
+  return JSON.parse(pako.inflate(buf,{to:'string'}));
+}
+const INV_S  = _D("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");
+const EXC_S  = _D("H4sIAGXwx2kC/yXKMQ6AIAwAwK8QZgdaKCV+zbgoixMf0MTESePA4uaLFP5gE9fLdbqssWy3bhURBsCAtlG6pqmOiyA6R8wAQfC5chmyIBtnDDsSe4+9plPMIxAZz2Ilzv8DsMjWB9t/CXacymcAAAA=");
+const SHR_S  = _D("H4sIAGXwx2kC/3XRPU7DMBiA4atUmRm+/x9ug5hh6lZ5gS6degGQkJioGLqwcSJI7tAkQ5xKrjzYll5ZevztOuzuN7vu7+fcv5zn4+Pzdtwl+W7TPTxNZ2O3sDLe/09fw/F7lSn5krli+lT1+7frx1SiPkYBkHP2se8/f1cZmerSoSIRJE7lcDwMr+/rkkyWklPEgaNMKbU5yrb0ROEMbQ5WNdygVLAgKbQl4VWMjOpM0JaIY5U4M0bqLOEbgwGMaqfAcUkTIyBaOcnjFKQ9HwFYlZLp2XaZG1INXUWFswkzEat/wMCu7F5KuQBreddBcwIAAA==");
+const ES_S   = _D("H4sIAGXwx2kC/6tWMlSyUqhWcgyOf7Og5c3iPWBecl4JkDbRUVBKzAWxDC2MTIxMaoF8oLq3/Z1vm+ciqTNGUmdgZGlhUQtSaYTTXEMjuAZjA1NLE3NcBpvB1ZkamZpbmoPNNcZtLsLBFiZmQGdAjH3TMudN0wYkdeYIY80tTUyhyl6vWvm2fw2SMoQrDY1MzEzNamtrAcn+0fIuAQAA");
+const WS_DATA = _D("H4sIAGXwx2kC/42Ty2pTURiFX0UylsN/v/gykoZiByLSCwglE+3EUV9AQXCkOOjEmU+k6Tu4TqrQfdpAEwjJ3mf9l/WtXK549eLZ5ertxenmZH12jB9KLOmhVRM9f7Y6frd5jVPPZmlt3R+evzp/ucapaJN2aNSUQZzy7+5ovrMKIpW0SS3EGndHp+s3m5Pjs33P3Zer3ddf+6/rzfnFem7DVlwOoQ19mCnS1Rl91BvvLW5vrz/efvg8FmjPLAzCg76culAkJ8kKYZ7lv3/e7N7fLPqHWWpxj+0lopkgdzOp3sv/fP92e/1jlItiZQ8bXWJ3Tc/QqaONmWPW764+PWyfAjPh5EJP3tbJkyhXU+l2O1eQJTp4nYH1JAZ0pQq1xlgUTkWWg6gQiobdZ0dwOcuwMdw0F3sSPGWqDItx/bk2AV1N4Z6ieZCdzuOrjewDpqkifxMXxJQH2SlCgqdl3JPgPU59MgNBITsIjytT8blgn8guFpvcy7NaDsJzQSPWZXYUr3SeFKkMRG/PTh+wa2HsCSr32c2DEyK7+NuFCIUqlqL71JCeRgLr7ukn/NmYVQmBX0zMRuyqMOIgKo7sKBm9xvzmBp/uhI9CMsSRkhaQtGbK/4WP0iFrCW8ahUmmWKPvhI9hEcOKjeCMwkAiuxtzAMj2L+M0OxIIBQAA");
+const BRANCHES  = ["\uc804\uc8fc", "\ud3c9\ud0dd", "\uad70\uc0b0", "\ubaa9\ud3ec", "\uc11c\uc0b0"];
+const OP_CODES  = ["O8", "OE", "ON", "OA", "OV"];
+const OP_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
+const BR_COLORS = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444'];
+const ALL_MONTHS = ["1", "2", "3"];
+
+// ── 필터 상태 ──────────────────────────────────────────────────
+const F = { year:'2026', month:"3", branch:'전체' };
+
+// ── 포맷 ──────────────────────────────────────────────────────
+function fmtAmt(v){
+  v = v||0;
+  if(Math.abs(v)>=1e8) return (v/1e8).toFixed(1)+'억';
+  if(Math.abs(v)>=1e4) return Math.round(v/1e4).toLocaleString()+'만';
+  return Math.round(v).toLocaleString();
+}
+function fmtFull(v){ return (v!=null?Math.round(v).toLocaleString():'0')+'원'; }
+
+// ── 집계 헬퍼 ─────────────────────────────────────────────────
+function selMonths(){
+  return F.month==='전체' ? ALL_MONTHS : [String(F.month)];
+}
+function selBranches(){
+  return F.branch==='전체' ? BRANCHES : [F.branch];
+}
+
+function aggInv(){
+  // {amt, alois:{}, o_codes:{}, o_avail, o_cnt}
+  const res={amt:0, alois:{}, o_codes:{}, o_avail:0, o_cnt:0};
+  selMonths().forEach(m=>{
+    selBranches().forEach(br=>{
+      const d=(INV_S[m]||{})[br]; if(!d) return;
+      res.amt+=d.amt||0; res.o_avail+=d.o_avail||0; res.o_cnt+=d.o_cnt||0;
+      Object.entries(d.alois||{}).forEach(([k,v])=>res.alois[k]=(res.alois[k]||0)+v);
+      Object.entries(d.o_codes||{}).forEach(([k,v])=>res.o_codes[k]=(res.o_codes[k]||0)+v);
+    });
+  });
+  return res;
+}
+function aggExcess(){
+  return selBranches().reduce((s,br)=>s+(EXC_S[br]||0), 0);
+}
+function aggShr(){
+  let cnt=0,amt=0;
+  selMonths().forEach(m=>{
+    selBranches().forEach(br=>{
+      const d=(SHR_S[m]||{})[br]; if(!d) return;
+      cnt+=d.cnt||0; amt+=d.amt||0;
+    });
+  });
+  return {cnt,amt};
+}
+function aggBranchInv(){
+  return BRANCHES.map(br=>
+    selMonths().reduce((s,m)=>s+((INV_S[m]||{})[br]||{}).amt||0, 0)
+  );
+}
+function aggBranchES(){
+  return BRANCHES.map(br=>{
+    let cnt=0,amt=0;
+    selMonths().forEach(m=>{
+      const d=(ES_S[m]||{})[br]; if(!d) return;
+      cnt+=d.cnt||0; amt+=d.amt||0;
+    });
+    return {cnt,amt};
+  });
+}
+
+// ── 차트 인스턴스 ──────────────────────────────────────────────
+const CHARTS={};
+function _chart(id, type, data, opts){
+  if(CHARTS[id]){ CHARTS[id].destroy(); }
+  CHARTS[id]=new Chart(document.getElementById(id),{type,data,options:opts});
+  return CHARTS[id];
+}
+function _updateChart(id, newData){
+  const c=CHARTS[id]; if(!c) return;
+  c.data.datasets[0].data=newData;
+  c.update('none');
+}
+
+// ── 차트 옵션 ─────────────────────────────────────────────────
+Chart.defaults.font.family='sans-serif';
+Chart.defaults.font.size=11;
+function barOpts(horiz){
+  return {
+    responsive:true, maintainAspectRatio:false,
+    indexAxis:horiz?'y':'x',
+    plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>fmtFull(ctx.raw)}}},
+    scales:{
+      x:{grid:{color:'#f1f5f9'},ticks:{color:'#64748b',callback:horiz?v=>fmtAmt(v):undefined}},
+      y:{grid:{display:!horiz,color:'#f1f5f9'},ticks:{color:'#64748b',callback:horiz?undefined:v=>fmtAmt(v)}}
+    }
+  };
+}
+function cntBarOpts(){
+  return {
+    responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.raw+'건'}}},
+    scales:{
+      x:{grid:{color:'#f1f5f9'},ticks:{color:'#64748b'}},
+      y:{grid:{color:'#f1f5f9'},ticks:{color:'#64748b'}}
+    }
+  };
+}
+function donutOpts(){
+  return {
+    responsive:true,maintainAspectRatio:false,
+    plugins:{
+      legend:{position:'right',labels:{boxWidth:12,font:{size:11},color:'#334155'}},
+      tooltip:{callbacks:{label:ctx=>ctx.label+': '+fmtFull(ctx.raw)}}
+    }
+  };
+}
+
+// ── 렌더링 ────────────────────────────────────────────────────
+const rendered=new Set();
+
+function renderOverview(update){
+  const inv=aggInv(), exc=aggExcess(), shr=aggShr();
+  const label=F.month==='전체'?'전체':''+F.month+'월';
+  document.getElementById('ov-inv').textContent=fmtAmt(inv.amt);
+  document.getElementById('ov-inv-sub').textContent=label+' 기준';
+  document.getElementById('ov-exc').textContent=fmtAmt(exc);
+  document.getElementById('ov-shr-cnt').textContent=shr.cnt.toLocaleString()+'건';
+  document.getElementById('ov-shr-amt').textContent=fmtAmt(shr.amt);
+  const brData=aggBranchInv();
+  if(update && CHARTS['ch-ov-branch']){ _updateChart('ch-ov-branch',brData); }
+  else{
+    _chart('ch-ov-branch','bar',
+      {labels:BRANCHES,datasets:[{data:brData,backgroundColor:BR_COLORS,borderRadius:4,borderSkipped:false}]},
+      barOpts(false));
+  }
+}
+
+function renderInventory(update){
+  const inv=aggInv();
+  const label=F.month==='전체'?'전체':''+F.month+'월';
+  document.getElementById('inv-total').textContent=fmtAmt(inv.amt);
+  document.getElementById('inv-sub').textContent=label+' 기준';
+  const brData=aggBranchInv();
+  if(update && CHARTS['ch-inv-branch']){ _updateChart('ch-inv-branch',brData); }
+  else{
+    _chart('ch-inv-branch','bar',
+      {labels:BRANCHES,datasets:[{data:brData,backgroundColor:BR_COLORS,borderRadius:4,borderSkipped:false}]},
+      barOpts(false));
+  }
+  // ALOIS
+  const sorted=Object.entries(inv.alois).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const aLabels=sorted.map(x=>x[0]), aData=sorted.map(x=>x[1]);
+  if(update && CHARTS['ch-inv-alois']){
+    CHARTS['ch-inv-alois'].data.labels=aLabels;
+    CHARTS['ch-inv-alois'].data.datasets[0].data=aData;
+    CHARTS['ch-inv-alois'].update('none');
+  } else {
+    _chart('ch-inv-alois','bar',
+      {labels:aLabels,datasets:[{data:aData,backgroundColor:'#3b82f6',borderRadius:4,borderSkipped:false}]},
+      barOpts(true));
+  }
+}
+
+function renderOPart(update){
+  const inv=aggInv();
+  const oTotal=Object.values(inv.o_codes).reduce((a,b)=>a+b,0);
+  const oAvail=inv.o_avail, oCnt=inv.o_cnt;
+  const totalAmt=inv.amt;
+  const oPct=totalAmt>0?(oTotal/totalAmt*100).toFixed(1):'0.0';
+  document.getElementById('op-total').textContent=fmtAmt(oTotal);
+  document.getElementById('op-avail').textContent=fmtAmt(oAvail);
+  document.getElementById('op-pct').textContent=oPct+'%';
+  document.getElementById('op-cnt').textContent=oCnt.toLocaleString()+'건';
+  const codeData=OP_CODES.map(oc=>inv.o_codes[oc]||0);
+  if(update && CHARTS['ch-op-donut']){
+    CHARTS['ch-op-donut'].data.datasets[0].data=codeData;
+    CHARTS['ch-op-donut'].update('none');
+  } else {
+    _chart('ch-op-donut','doughnut',
+      {labels:OP_CODES,datasets:[{data:codeData,backgroundColor:OP_COLORS,borderWidth:2,borderColor:'#fff',hoverOffset:4}]},
+      donutOpts());
+    // 코드별 미니 카드 (최초 1회)
+    const grid=document.getElementById('op-code-grid');
+    if(!grid.children.length){
+      OP_CODES.forEach((oc,i)=>{
+        const card=document.createElement('div');
+        card.className='kpi-card'; card.style.borderColor=OP_COLORS[i];
+        card.id='op-card-'+oc;
+        card.innerHTML=`<div class="kpi-label">${oc}</div>
+          <div class="kpi-value" id="op-cv-${oc}">-</div>
+          <div class="kpi-sub" id="op-cp-${oc}">-</div>`;
+        grid.appendChild(card);
+      });
+    }
+  }
+  // 코드별 카드 값 업데이트
+  const total=codeData.reduce((a,b)=>a+b,0);
+  OP_CODES.forEach((oc,i)=>{
+    const v=codeData[i];
+    const pct=total>0?(v/total*100).toFixed(1):'0.0';
+    const cv=document.getElementById('op-cv-'+oc);
+    const cp=document.getElementById('op-cp-'+oc);
+    if(cv) cv.textContent=fmtAmt(v);
+    if(cp) cp.textContent=pct+'%';
+  });
+}
+
+function renderES(update){
+  const brES=aggBranchES();
+  const totalCnt=brES.reduce((s,d)=>s+d.cnt,0);
+  const totalAmt=brES.reduce((s,d)=>s+d.amt,0);
+  document.getElementById('es-cnt').textContent=totalCnt.toLocaleString()+'건';
+  document.getElementById('es-amt').textContent=fmtAmt(totalAmt);
+  const cntData=brES.map(d=>d.cnt);
+  const amtData=brES.map(d=>d.amt);
+  if(update && CHARTS['ch-es-cnt']){ _updateChart('ch-es-cnt',cntData); }
+  else{
+    _chart('ch-es-cnt','bar',
+      {labels:BRANCHES,datasets:[{data:cntData,backgroundColor:BR_COLORS,borderRadius:4,borderSkipped:false}]},
+      cntBarOpts());
+  }
+  if(update && CHARTS['ch-es-amt']){ _updateChart('ch-es-amt',amtData); }
+  else{
+    _chart('ch-es-amt','bar',
+      {labels:BRANCHES,datasets:[{data:amtData,backgroundColor:BR_COLORS,borderRadius:4,borderSkipped:false}]},
+      barOpts(false));
+  }
+}
+
+function renderWholesale(update){
+  const mo = F.month==='전체' ? ALL_MONTHS[ALL_MONTHS.length-1] : String(F.month);
+  const mData = WS_DATA[mo] || {};
+  const purchase   = mData.purchase || 0;
+  const excl       = mData.excl     || 0;
+  const recognized = purchase - excl;
+  const tgtA = mData.tgt_a || 0;
+  const tgtB = mData.tgt_b || 0;
+  const rateA = tgtA > 0 ? (recognized / tgtA * 100) : 0;
+  const rateB = tgtB > 0 ? (recognized / tgtB * 100) : 0;
+  const clrA = rateA >= 100 ? '#10b981' : '#ef4444';
+  const clrB = rateB >= 100 ? '#10b981' : '#ef4444';
+
+  document.getElementById('ws-mo').textContent      = mo+'월 실적';
+  document.getElementById('ws-purchase').textContent = fmtAmt(purchase);
+  document.getElementById('ws-recog').textContent    = fmtAmt(recognized);
+  document.getElementById('ws-excl').textContent     = fmtAmt(excl);
+  document.getElementById('ws-rate-a').textContent   = rateA.toFixed(1)+'%';
+  document.getElementById('ws-rate-a').style.color   = clrA;
+  document.getElementById('ws-tgt-a').textContent    = 'Target: '+fmtAmt(tgtA);
+  document.getElementById('ws-rate-b').textContent   = rateB.toFixed(1)+'%';
+  document.getElementById('ws-rate-b').style.color   = clrB;
+  document.getElementById('ws-tgt-b').textContent    = 'Target: '+fmtAmt(tgtB);
+
+  const brs       = mData.branches || {};
+  const brActuals = BRANCHES.map(br => (brs[br] ? brs[br].actual : 0));
+  const brTargets = BRANCHES.map(br => (brs[br] ? brs[br].tgt_a  : 0));
+
+  if(update && CHARTS['ch-ws-bar']){
+    CHARTS['ch-ws-bar'].data.datasets[0].data  = brActuals;
+    CHARTS['ch-ws-bar'].data.datasets[0].label = mo+'월 실적';
+    CHARTS['ch-ws-bar'].data.datasets[1].data  = brTargets;
+    CHARTS['ch-ws-bar'].update('none');
+  } else {
+    _chart('ch-ws-bar','bar',
+      {labels:BRANCHES, datasets:[
+        {label:mo+'월 실적', data:brActuals, backgroundColor:BR_COLORS, borderRadius:4, borderSkipped:false},
+        {label:'A Target',  data:brTargets, backgroundColor:'rgba(100,116,139,0.18)', borderColor:'#94a3b8', borderWidth:1.5, borderRadius:4, borderSkipped:false}
+      ]},
+      {responsive:true, maintainAspectRatio:false,
+        plugins:{legend:{display:true, labels:{font:{size:10}, boxWidth:10, color:'#334155'}},
+                  tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmtFull(ctx.raw)}}},
+        scales:{
+          x:{grid:{color:'#f1f5f9'}, ticks:{color:'#64748b'}},
+          y:{grid:{color:'#f1f5f9'}, ticks:{color:'#64748b', callback:v=>fmtAmt(v)}}
+        }
+      });
+  }
+}
+
+const RENDERERS=[renderOverview,renderInventory,renderOPart,renderES,renderWholesale];
+
+function renderAll(update){
+  rendered.forEach(i=>RENDERERS[i](update));
+}
+
+// ── 필터 ──────────────────────────────────────────────────────
+let filterOpen=false;
+function toggleFilter(){
+  filterOpen=!filterOpen;
+  document.getElementById('filter-panel').classList.toggle('open',filterOpen);
+  document.getElementById('pages').classList.toggle('filter-open',filterOpen);
+}
+
+function setF(type, val, btn){
+  F[type]=val;
+  // 버튼 active 상태 업데이트
+  const container=btn.closest('.fp-btns');
+  container.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  // 필터 아이콘 색상 (기본값 아닌 경우 강조)
+  const hasFilter=(F.month!==ALL_MONTHS[ALL_MONTHS.length-1]||F.branch!=='전체');
+  document.getElementById('filter-btn').classList.toggle('has-filter',hasFilter);
+  renderAll(true);
+}
+
+// ── 페이지 전환 ───────────────────────────────────────────────
+const PAGE_TITLES=['종합현황','재고현황','O Part','외부판매','Wholesale'];
+const pages=document.querySelectorAll('.page');
+const tabs=document.querySelectorAll('.tab');
+const dots=document.querySelectorAll('.dot');
+let cur=0;
+
+function goPage(n){
+  if(n<0||n>=pages.length) return;
+  cur=n;
+  pages.forEach((p,i)=>{
+    p.style.transition='transform .3s cubic-bezier(.4,0,.2,1)';
+    p.style.transform=`translateX(${(i-cur)*100}%)`;
+  });
+  tabs.forEach((t,i)=>t.classList.toggle('active',i===cur));
+  dots.forEach((d,i)=>d.classList.toggle('active',i===cur));
+  document.getElementById('page-title').textContent=PAGE_TITLES[cur];
+  if(!rendered.has(cur)){
+    rendered.add(cur);
+    RENDERERS[cur](false);
+  }
+  // 필터 패널 닫기
+  if(filterOpen){ filterOpen=false; document.getElementById('filter-panel').classList.remove('open'); document.getElementById('pages').classList.remove('filter-open'); }
+}
+
+// ── 스와이프 ──────────────────────────────────────────────────
+let tx=0, ty=0;
+const pagesEl=document.getElementById('pages');
+pagesEl.addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY;},{passive:true});
+pagesEl.addEventListener('touchend',e=>{
+  const dx=e.changedTouches[0].clientX-tx, dy=e.changedTouches[0].clientY-ty;
+  if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>40){ if(dx<0) goPage(cur+1); else goPage(cur-1); }
+},{passive:true});
+
+// ── 초기화 ────────────────────────────────────────────────────
+(function(){
+  pages.forEach((p,i)=>{ p.style.transition='none'; p.style.transform=`translateX(${i*100}%)`; });
+  rendered.add(0);
+  renderOverview(false);
+})();
+</script>
+</body>
+</html>
